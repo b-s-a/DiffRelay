@@ -12,10 +12,14 @@
 #define ERROR_NO_SENSOR (1 << 0)
 #define ERROR_OVERHEAT  (1 << 1)
 
-#define T_ON 60.0
-#define T_OFF 30.0
-#define DT_ON 20.0
+#define T_ON 40.0
+#define T_OFF 20.0
+#define T_OVH 100.0
+#define DT_ON 15.0
 #define DT_OFF 5.0
+
+#define RELAY_ON LOW
+#define RELAY_OFF HIGH
 
 bool              pumpRelay;
 uint8_t           error;
@@ -34,7 +38,7 @@ void setup()
     pinMode(PIN_PUMP_RELAY, OUTPUT);
     digitalWrite(PIN_LED_STARTED, HIGH);
     digitalWrite(PIN_LED_ERROR, LOW);
-    digitalWrite(PIN_PUMP_RELAY, LOW);
+    digitalWrite(PIN_PUMP_RELAY, RELAY_OFF);
     Serial.begin(9600, SERIAL_8N1);
     sensors.begin();
 }
@@ -93,7 +97,7 @@ void pollSensors()
     static float dt_max_avg;
     dt_max_avg = (dt_max_avg + dt_max)/2;
 
-    bool overheat = (t_max >= 100.0);
+    bool overheat = (t_max >= T_OVH);
     if (overheat)
         error |= ERROR_OVERHEAT;
     else if (error & ERROR_OVERHEAT)
@@ -117,7 +121,7 @@ void pollSensors()
             pumpRelay = true;
         else if (pumpRelay && stop)
             pumpRelay = false;
-        digitalWrite(PIN_PUMP_RELAY, pumpRelay ? HIGH : LOW);
+        digitalWrite(PIN_PUMP_RELAY, pumpRelay ? RELAY_ON : RELAY_OFF);
     }
 }
 
