@@ -20,24 +20,24 @@ Sensors::Sensors(uint8_t pin, uint8_t num)
     onewire_ = new OneWire(pin);
     if (onewire_ == nullptr) {
         //digitalWrite(7, 1);
-        for(;;);
+        exit(1);
     }
     sensors_ = new DallasTemperature(onewire_);
     if (sensors_ == nullptr) {
         //digitalWrite(8, 1);
-        for(;;);
+        exit(1);
     }
     //sensors_->begin();
     sensors_->setResolution(12);
     addr_ = new Addr[num];
     if (addr_ == nullptr) {
         //digitalWrite(LED_BUILTIN, 1);
-        for(;;);
+        exit(1);
     }
     temp_ = new float[num];
     if (temp_ == nullptr) {
         //digitalWrite(LED_BUILTIN, 1);
-        for(;;);
+        exit(1);
     }
     for (uint8_t i = 0; i < num_; i++) {
         addr_[i].i = 0;
@@ -110,6 +110,11 @@ bool Sensors::isConnected() const
     for (uint8_t i = 0; ret && i < num_; i++)
         ret = (addr_[i].i != 0);
     return ret;
+}
+
+bool Sensors::isConnected(uint8_t idx) const
+{
+    return (addr_[idx].i != 0);
 }
 
 uint64_t Sensors::address(uint8_t idx) const

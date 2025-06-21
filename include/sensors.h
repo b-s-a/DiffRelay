@@ -16,6 +16,7 @@ public:
     void begin();
     void poll();
     bool isConnected() const;
+    bool isConnected(uint8_t idx) const;
     float operator[](uint8_t idx) const { return temp_[idx]; }
     uint64_t address(uint8_t idx) const;
     void setAddress(uint8_t idx, uint64_t addr);
@@ -33,6 +34,7 @@ private:
 
     bool requestCount();
     void loadTemperature(uint8_t idx);
+    Sensors& operator=(const Sensors&);
 };
 
 #endif /* SENSORS_H */
