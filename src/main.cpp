@@ -1,4 +1,5 @@
-#include <Arduino.h>
+include <Arduino.h>
+#include <LiquidCrystal_I2C.h>
 //#include <ModbusSlave.h>
 
 #include "sensors.h"
@@ -7,7 +8,8 @@
 #define PIN_LED_ERROR 8
 #define PIN_TXEN 2
 #define PIN_ONEWIRE PIN_A3
-#define PIN_PUMP_RELAY 13
+#define PIN_PUMP_RELAY 11
+#define PIN_PUMP_RELAY_I 12
 
 #define ERROR_NO_SENSOR (1 << 0)
 #define ERROR_OVERHEAT  (1 << 1)
@@ -18,15 +20,26 @@
 #define DT_ON 15.0
 #define DT_OFF 5.0
 
-#define RELAY_ON LOW
-#define RELAY_OFF HIGH
-
 bool              pumpRelay;
+bool              overheat;
 uint8_t           error;
 Sensors           sensors(PIN_ONEWIRE, 2);
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+static
+const char customChars[8][8] PROGMEM = {
+    { B00000, B00000, B10000, B10000, B11111, B00001, B00001, B00000 },
+    { B00000, B00000, B00100, B01000, B00100, B00010, B00100, B00000 },
+    { B00000, B00000, B00111, B00100, B00100, B00100, B11100, B00000 },
+    { B00000, B00000, B00000, B00010, B10101, B01000, B00000, B00000 },
+    { B00100, B01110, B10101, B00100, B00100, B00100, B00100, B00100 }, //4 - ↑
+    { B00100, B00100, B00100, B00100, B00100, B10101, B01110, B00100 }, //5 - ↓
+};
 
 void pollLeds();
-void pollSensors();
+void pollPump();
+void pollLcd();
+void setPump(bool enable, bool force = false);
 void debugPrints();
 
 void setup()
@@ -36,19 +49,25 @@ void setup()
     pinMode(PIN_LED_ERROR, OUTPUT);
     pinMode(PIN_TXEN, OUTPUT);
     pinMode(PIN_PUMP_RELAY, OUTPUT);
+    pinMode(PIN_PUMP_RELAY_I, OUTPUT);
+    pinMode(LED_BUILTIN, OUTPUT);
     digitalWrite(PIN_LED_STARTED, HIGH);
     digitalWrite(PIN_LED_ERROR, LOW);
-    digitalWrite(PIN_PUMP_RELAY, RELAY_OFF);
+    setPump(false, true);
     Serial.begin(9600, SERIAL_8N1);
     sensors.begin();
+    lcd.init();
+    for (uint8_t i = 0; i < sizeof(customChars)/sizeof(customChars[0]); i++)
+        lcd.createChar(i, customChars[i]);
 }
 
 void loop()
 {
     delay(100);
     sensors.poll();
-    pollSensors();
+    pollPump();
     pollLeds();
+    pollLcd();
     debugPrints();
     if (error == 0)
         digitalWrite(PIN_LED_ERROR, LOW);
@@ -71,10 +90,10 @@ void pollLeds()
     digitalWrite(PIN_LED_STARTED, ledStatus ? HIGH : LOW);
 }
 
-void pollSensors()
+void pollPump()
 {
     unsigned long ms = millis();
-    static unsigned long prevMs = ms;
+    static unsigned long prevMs = ms + 100;
 
     if (ms - prevMs < 1000)
         return;
@@ -97,7 +116,7 @@ void pollSensors()
     static float dt_max_avg;
     dt_max_avg = (dt_max_avg + dt_max)/2;
 
-    bool overheat = (t_max >= T_OVH);
+    overheat = (t_max >= T_OVH);
     if (overheat)
         error |= ERROR_OVERHEAT;
     else if (error & ERROR_OVERHEAT)
@@ -118,11 +137,95 @@ void pollSensors()
     counter--;
     if (counter == 0) {
         if (!pumpRelay && start)
-            pumpRelay = true;
+            setPump(true);
         else if (pumpRelay && stop)
-            pumpRelay = false;
-        digitalWrite(PIN_PUMP_RELAY, pumpRelay ? RELAY_ON : RELAY_OFF);
+            setPump(false);
     }
+}
+
+static void lcdPrintSensor(uint8_t idx)
+{
+    if (!sensors.isConnected(0)) {
+        lcd.print(F("  n/c  "));
+        return;
+    }
+    float t = sensors[0];
+    if (t < 0) {
+        t -=  0.005;
+        if (t > -10.0)
+            lcd.write(' ');
+    } else {
+        t += 0.005;
+        if (t < 100) {
+            lcd.write(' ');
+            if (t < 10)
+                lcd.write(' ');
+        }
+    }
+    lcd.print(sensors[0], 2);
+    lcd.write(223); // degree symbol
+}
+
+void pollLcd()
+{
+    unsigned long ms = millis();
+    static unsigned long prevMs = ms + 200;
+
+    if (ms - prevMs < 1000)
+        return;
+    prevMs = ms;
+
+    lcd.noBlink();
+    lcd.noCursor();
+    lcd.noAutoscroll();
+    lcd.backlight();
+    lcd.leftToRight();
+
+    // 0123456789abcdef
+    // IDLE X
+    // 000.00°  000.00°
+
+    // WORK X
+    // 000.00°  000.00°
+
+    // WORK X  OVERHEAT
+    // 000.00°  000.00°
+
+    // --=== FAIL ===--
+    //   n/c      n/c
+
+    lcd.setCursor(0, 1);
+    lcdPrintSensor(0);
+    lcd.setCursor(9, 1);
+    lcdPrintSensor(1);
+
+    lcd.setCursor(0, 0);
+    if (!sensors.isConnected()) {
+        lcd.print(F("--=== FAIL ===--"));
+        return;
+    }
+
+    lcd.print(pumpRelay ? F("WORK ") : F("IDLE  "));
+    if (pumpRelay) {
+        static uint8_t cnt;
+        lcd.write(cnt++ % 4);
+    }
+    if (overheat)
+        lcd.print(F("  OVERHEAT"));
+    else {
+        for (uint8_t i = 6; i <= 0x0f; i++)
+            lcd.write(' ');
+    }
+}
+
+void setPump(bool enable, bool force)
+{
+    if (!force && enable == pumpRelay)
+        return;
+    pumpRelay = enable;
+    digitalWrite(LED_BUILTIN, enable ? HIGH : LOW);
+    digitalWrite(PIN_PUMP_RELAY, enable ? HIGH : LOW);
+    digitalWrite(PIN_PUMP_RELAY_I, enable ? LOW : HIGH);
 }
 
 void debugPrints()
