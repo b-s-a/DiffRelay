@@ -1,4 +1,4 @@
-include <Arduino.h>
+#include <Arduino.h>
 #include <LiquidCrystal_I2C.h>
 //#include <ModbusSlave.h>
 
@@ -21,7 +21,6 @@ include <Arduino.h>
 #define DT_OFF 5.0
 
 bool              pumpRelay;
-bool              overheat;
 uint8_t           error;
 Sensors           sensors(PIN_ONEWIRE, 2);
 LiquidCrystal_I2C lcd(0x27, 16, 2);
@@ -51,9 +50,10 @@ void setup()
     pinMode(PIN_PUMP_RELAY, OUTPUT);
     pinMode(PIN_PUMP_RELAY_I, OUTPUT);
     pinMode(LED_BUILTIN, OUTPUT);
-    digitalWrite(PIN_LED_STARTED, HIGH);
-    digitalWrite(PIN_LED_ERROR, LOW);
-    setPump(false, true);
+    digitalWrite(PIN_LED_STARTED, LOW);
+    digitalWrite(PIN_LED_ERROR, HIGH);
+    digitalWrite(PIN_PUMP_RELAY, LOW);
+    digitalWrite(PIN_ONEWIRE, LOW);
     Serial.begin(9600, SERIAL_8N1);
     sensors.begin();
     lcd.init();
@@ -104,10 +104,10 @@ void pollPump()
     else
         error |= ERROR_NO_SENSOR;
 
-    //Pump is STARTED when overheat (max temperature is above 100°) or
-    //delta between sensors is above 20° and most heat sensor temperature is raised and it is greater than 60°
+    //Pump is STARTED when sensors issue or overheat (max temperature is above 100°) or
+    //delta between sensors is above 15° and most heat sensor temperature is raised and it is greater than 40°
     //Pump is STOPPED when no overheat and most heat sensor temperature is lowered and
-    //delta between sensors is below 5° or most heat sensor temperature is below 30°.
+    //delta between sensors is below 5° or most heat sensor temperature is below 20°.
 
     static float t_max_avg;
     float t_max = fmaxf(sensors[0], sensors[1]);
@@ -116,15 +116,15 @@ void pollPump()
     static float dt_max_avg;
     dt_max_avg = (dt_max_avg + dt_max)/2;
 
-    overheat = (t_max >= T_OVH);
-    if (overheat)
+    if (t_max >= T_OVH)
         error |= ERROR_OVERHEAT;
-    else if (error & ERROR_OVERHEAT)
+    else
         error &= ~ERROR_OVERHEAT;
 
-    float delta = (error & ERROR_NO_SENSOR) ? 0.0 : fabsf(sensors[0] - sensors[1]);
-    bool start = overheat || (delta > DT_ON && dt_max_avg > 0.0 && t_max > T_ON);
-    bool stop = !overheat && dt_max_avg <= 0.0 && (delta < DT_OFF || t_max < T_OFF);
+    const bool err = (error & (ERROR_NO_SENSOR|ERROR_OVERHEAT)) != 0;
+    float delta = err ? 0.0 : fabsf(sensors[0] - sensors[1]);
+    bool start = err || (delta > DT_ON && dt_max_avg > 0.0 && t_max > T_ON);
+    bool stop = !err && dt_max_avg <= 0.0 && (delta < DT_OFF || t_max < T_OFF);
 
     static int8_t counter; //delay between relay changes
     if (counter == 0) {
@@ -210,7 +210,7 @@ void pollLcd()
         static uint8_t cnt;
         lcd.write(cnt++ % 4);
     }
-    if (overheat)
+    if (error & ERROR_OVERHEAT)
         lcd.print(F("  OVERHEAT"));
     else {
         for (uint8_t i = 6; i <= 0x0f; i++)
