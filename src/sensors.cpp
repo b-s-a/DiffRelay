@@ -140,6 +140,7 @@ void Sensors::loadTemperature(uint8_t idx)
 {
     //sensors autodetection
     if (addr_[idx].i == 0) {
+        static uint8_t retry = 0;
         if (sensors_->getAddress(addr_[idx].a, idx)) {
             for (uint8_t i = 0; i < num_; i++) {
                 if (i == idx)
@@ -147,6 +148,17 @@ void Sensors::loadTemperature(uint8_t idx)
                 if (addr_[idx].i == addr_[i].i)
                     addr_[i].i = 0;
             }
+            retry = 0;
+        } else switch (retry) {
+        case 0:
+            retry = 10;
+            break;
+        case 1:
+            state_ = -128; //reset onewire bus and repeat full sensors redetection
+            retry = 0;
+            break;
+        default:
+            retry--;
         }
         return;
     }
